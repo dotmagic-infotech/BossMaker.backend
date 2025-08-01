@@ -55,16 +55,6 @@ export const defaultPermissions = {
       is_access: false,
     },
   ],
-  Password: [
-    {
-      title: "Edit Password",
-      module: "password",
-      slug: "edit_password",
-      action: "edit",
-      _id: new mongoose.Types.ObjectId(),
-      is_access: false,
-    },
-  ],
 };
 
 export const studentPermissions = {
