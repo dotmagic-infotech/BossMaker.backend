@@ -1,53 +1,44 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
-import "express-async-errors"; // auto catches async errors
-import morgan from "morgan";
 
-// Route imports
+// Import routes
 import authRoutes from "./routes/authRoutes.js";
+import categoryRoutes from "./routes/categoryRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
-// (import other routes similarly if you have them)
-// e.g., import categoryRoutes from "./routes/categoryRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import courseRoutes from "./routes/courseRoutes.js";
 
+// Load env vars
 dotenv.config();
 
-// MongoDB connection helper
+// MongoDB connection
 const connectDB = async () => {
   try {
-    if (!process.env.MONGO_URI) throw new Error("MONGO_URI not defined");
-    await mongoose.connect(process.env.MONGO_URI, {
-      // optionally you can pass options here
-      // useNewUrlParser: true, useUnifiedTopology: true
-    });
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI not defined");
+    }
+    await mongoose.connect(process.env.MONGO_URI);
     console.log("🗄️  MongoDB connected");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err.message);
-    process.exit(1);
+    process.exit(1); // stop server if DB connection fails
   }
 };
 
-// Connection event listeners (for extra visibility)
-mongoose.connection.on("connected", () => console.log("🟢 Mongoose connected"));
-mongoose.connection.on("error", (err) =>
-  console.error("Mongoose connection error:", err)
-);
-
 connectDB();
 
-// __dirname setup for ES modules
+// Setup __dirname in ES module scope
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Express app init
+// Init app
 const app = express();
 
 // Middleware
-app.use(morgan("dev"));
 app.use(cors());
 app.use((req, res, next) => {
   res.header(
@@ -64,25 +55,17 @@ app.get("/health", (req, res) =>
   res.json({ status: "ok", timestamp: new Date().toISOString() })
 );
 
-// Static uploads (if used)
+// Static folder
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/categories", categoryRoutes);
 app.use("/api/user", userRoutes);
-// mount other routes here, e.g.:
-// app.use("/api/categories", categoryRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/course", courseRoutes);
 
-/////////////////////////
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error("🔥 Unhandled error:", err.stack || err);
-  res.status(500).json({
-    error: "Internal Server Error",
-    message: process.env.NODE_ENV === "development" ? err.message : undefined,
-  });
-});
-
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
