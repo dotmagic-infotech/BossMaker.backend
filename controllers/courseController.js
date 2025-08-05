@@ -364,6 +364,8 @@ export const updateCourse = async (req, res) => {
     course.user_type = user_type;
     course.course_image = course_image;
 
+    const sourceSections = await Section.find({ course_id: courseId });
+
     if (user_type === 1) {
       const originalInstructorIds = Array.isArray(course.assigned_to)
         ? course.assigned_to.map((id) => id.toString()).sort()
@@ -410,6 +412,31 @@ export const updateCourse = async (req, res) => {
             created_by: userId,
           });
           await duplicateCourse.save();
+
+          for (const sec of sourceSections) {
+            const clonedSection = new Section({
+              course_id: duplicateCourse._id.toString(),
+              title: sec.title,
+              lesson: sec.lesson,
+              image: sec.image,
+              video: sec.video,
+              document: sec.document,
+            });
+            const savedSection = await clonedSection.save();
+
+            // Clone uploads
+            const uploads = await Upload.find({ section_id: sec._id });
+            for (const file of uploads) {
+              const clonedUpload = new Upload({
+                file_name: file.file_name,
+                file_path: file.file_path,
+                file_title: file.file_title,
+                section_id: savedSection._id,
+              });
+              console.log("clonedUpload", clonedUpload);
+              await clonedUpload.save();
+            }
+          }
         }
 
         return res.status(200).json({
@@ -424,6 +451,65 @@ export const updateCourse = async (req, res) => {
     }
 
     await course.save();
+
+    const existingSections = sourceSections;
+    const incomingSectionIds = sections
+      .filter((s) => s._id && mongoose.Types.ObjectId.isValid(s._id))
+      .map((s) => s._id.toString());
+
+    console.log("existingSections", existingSections);
+    console.log("incomingSectionIds", incomingSectionIds);
+
+    const sectionsToDelete = existingSections.filter(
+      (s) => !incomingSectionIds.includes(s._id.toString())
+    );
+    for (const sec of sectionsToDelete) {
+      const allFileIds = [
+        ...(sec.image || []),
+        ...(sec.video || []),
+        ...(sec.document || []),
+      ].map((f) => f._id);
+
+      if (allFileIds.length > 0) {
+        const uploadedFiles = await Upload.find({ _id: { $in: allFileIds } });
+        for (const file of uploadedFiles) {
+          if (file?.file_path && fs.existsSync(file.file_path)) {
+            fs.unlinkSync(file.file_path);
+          }
+        }
+        await Upload.deleteMany({ _id: { $in: allFileIds } });
+      }
+      await Section.findByIdAndDelete(sec._id);
+    }
+
+    console.log("sections", sections);
+    for (const sec of sections) {
+      const isValidMongoId =
+        sec._id && mongoose.Types.ObjectId.isValid(sec._id.toString());
+      console.log("sec", sec);
+      if (!isValidMongoId) {
+        const newSec = new Section({
+          course_id: courseId,
+          title: sec.title,
+          lesson: sec.lesson,
+          image: sec.image || [],
+          video: sec.video || [],
+          document: sec.document || [],
+        });
+        console.log("newSec", newSec);
+        await newSec.save();
+      } else {
+        const dbSection = await Section.findById(sec._id);
+        if (!dbSection) continue;
+
+        dbSection.title = sec.title;
+        dbSection.lesson = sec.lesson;
+        dbSection.image = sec.image || [];
+        dbSection.video = sec.video || [];
+        dbSection.document = sec.document || [];
+        await dbSection.save();
+      }
+    }
 
     res.status(200).json({
       status: true,
