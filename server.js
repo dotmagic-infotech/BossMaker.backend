@@ -56,7 +56,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/course", courseRoutes);
-app.use("/api/uploadfile", uploadfileRoutes);
+app.use("/api/uploadFile", uploadfileRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
