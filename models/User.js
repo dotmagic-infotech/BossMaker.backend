@@ -60,7 +60,7 @@ const userSchema = new mongoose.Schema(
             slug: "view_category",
             action: "view",
             _id: new mongoose.Types.ObjectId(),
-            is_access: false,
+            is_access: true,
           },
           {
             title: "Edit Category",
@@ -78,7 +78,7 @@ const userSchema = new mongoose.Schema(
             slug: "view_role",
             action: "view",
             _id: new mongoose.Types.ObjectId(),
-            is_access: false,
+            is_access: true,
           },
           {
             title: "Edit Role",
@@ -96,7 +96,7 @@ const userSchema = new mongoose.Schema(
             slug: "view_course",
             action: "view",
             _id: new mongoose.Types.ObjectId(),
-            is_access: false,
+            is_access: true,
           },
           {
             title: "Edit Course",

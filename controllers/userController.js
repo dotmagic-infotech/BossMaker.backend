@@ -4,9 +4,17 @@ import { encrypt, decrypt } from "../utils/crypto.js";
 import User from "../models/User.js";
 import Course from "../models/Course.js";
 import Category from "../models/Category.js";
-import { defaultPermissions, studentPermissions } from "../config/defaultPermissions.js";
+import Section from "../models/Section.js";
+import Upload from "../models/Upload.js";
+import {
+  defaultPermissions,
+  studentPermissions,
+} from "../config/defaultPermissions.js";
 
-const getImageURL = (req, filename) => filename ? `${req.protocol}://${req.get("host")}/uploads/users/${filename}` : null;
+const getImageURL = (req, filename) =>
+  filename
+    ? `${req.protocol}://${req.get("host")}/uploads/users/${filename}`
+    : null;
 
 export const createUser = async (req, res) => {
   let uploadedFile = null;
@@ -48,7 +56,7 @@ export const createUser = async (req, res) => {
       mobile_no,
       dob: dob || null,
       status: status || false,
-      permission: (user_type === "3") ? studentPermissions : defaultPermissions,
+      permission: user_type === "3" ? studentPermissions : defaultPermissions,
       created_by,
     });
 
@@ -254,11 +262,35 @@ export const deleteUser = async (req, res) => {
 
       for (const course of courses) {
         if (course.course_image) {
-          const courseImagePath = path.join(
-            "uploads/courses",
-            course.course_image
-          );
-          if (fs.existsSync(courseImagePath)) fs.unlinkSync(courseImagePath);
+          const imageDoc = await Upload.findById(course.course_image);
+          if (imageDoc?.file_path) {
+            const courseImagePath = path.join(imageDoc.file_path);
+            if (fs.existsSync(courseImagePath)) fs.unlinkSync(courseImagePath);
+          }
+          await Upload.deleteOne({ _id: course.course_image });
+        }        
+
+        const sections = await Section.find({ course_id: course._id });
+
+        for (const section of sections) {
+          const allFiles = [
+            ...(section.image || []),
+            ...(section.video || []),
+            ...(section.document || []),
+          ];
+
+          for (const fileObj of allFiles) {
+            const uploadDoc = await Upload.findById(fileObj._id); // <-- Fetch full upload document
+            if (uploadDoc?.file_path) {
+              const filePath = path.join(uploadDoc.file_path);
+              if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+              }
+            }
+            await Upload.deleteOne({ _id: fileObj._id });
+          }          
+          
+          await Section.findByIdAndDelete(section._id);
         }
         await Course.findByIdAndDelete(course._id);
       }
@@ -268,7 +300,7 @@ export const deleteUser = async (req, res) => {
         if (participant.profile_image) {
           const pImagePath = path.join(
             "uploads/users",
-            participant.profile_image
+            String(participant.profile_image)
           );
           if (fs.existsSync(pImagePath)) fs.unlinkSync(pImagePath);
         }
@@ -277,7 +309,6 @@ export const deleteUser = async (req, res) => {
       await Category.deleteMany({
         $or: [{ created_by: id }, { assigned_to: id }],
       });
-      
     }
 
     if (user.profile_image) {
@@ -296,7 +327,9 @@ export const deleteUser = async (req, res) => {
 export const chackUserStatus = async (req, res) => {
   const userId = req.params.id;
   if (!userId) {
-    return res.status(400).json({ status: false, message: "User ID is required" });
+    return res
+      .status(400)
+      .json({ status: false, message: "User ID is required" });
   }
   const user = await User.findById(userId);
   if (!user) {
@@ -344,7 +377,7 @@ export const updateUserStatus = async (req, res) => {
           },
         }
       );
-      
+
       const courses = await Course.find({
         $or: [{ created_by: bossmakerId }, { assigned_to: bossmakerId }],
       });

@@ -219,7 +219,7 @@ export const deleteCategory = async (req, res) => {
 
     res.status(200).json({
       message:
-        "Category and its related courses have been disabled successfully.",
+        "Category and its related courses have been deleted successfully.",
     });
   } catch (err) {
     res.status(500).json({

@@ -373,77 +373,31 @@ export const updateCourse = async (req, res) => {
         ? [course.assigned_to.toString()]
         : [];
 
-      const newInstructorIds = roleIdsObjectIds
-        .map((id) => id.toString())
-        .sort();
+      const newInstructorIds = roleIdsObjectIds.map((id) => id.toString()).sort();
 
       const isSameInstructors =
         originalInstructorIds.length === newInstructorIds.length &&
-        originalInstructorIds.every(
-          (val, index) => val === newInstructorIds[index]
-        );
+        originalInstructorIds.every((val, index) => val === newInstructorIds[index]);
 
-      if (isSameInstructors) {
-        course.instructor_ids = roleIdsObjectIds;
-        course.assigned_to = roleIdsObjectIds;
-      } else {
-        const conflict = await Course.findOne({
-          _id: { $ne: courseId },
-          title: title.trim(),
-          assigned_to: { $in: roleIdsObjectIds },
-        });
+      if (!isSameInstructors) {
+        // const conflict = await Course.findOne({
+        //   _id: { $ne: courseId },
+        //   title: title.trim(),
+        //   assigned_to: { $in: roleIdsObjectIds },
+        // });
 
-        if (conflict) {
-          throw new Error(
-            "One or more selected instructors already have this course assigned."
-          );
-        }
+        // if (conflict) {
+        //   throw new Error(
+        //     "One or more selected instructors already have this course assigned."
+        //   );
+        // }
 
-        for (const instructorId of roleIdsObjectIds) {
-          const duplicateCourse = new Course({
-            title: title.trim(),
-            description,
-            category_id,
-            course_image,
-            status,
-            user_type: 2,
-            instructor_ids: [instructorId],
-            assigned_to: [instructorId],
-            created_by: userId,
-          });
-          await duplicateCourse.save();
-
-          for (const sec of sourceSections) {
-            const clonedSection = new Section({
-              course_id: duplicateCourse._id.toString(),
-              title: sec.title,
-              lesson: sec.lesson,
-              image: sec.image,
-              video: sec.video,
-              document: sec.document,
-            });
-            const savedSection = await clonedSection.save();
-
-            // Clone uploads
-            const uploads = await Upload.find({ section_id: sec._id });
-            for (const file of uploads) {
-              const clonedUpload = new Upload({
-                file_name: file.file_name,
-                file_path: file.file_path,
-                file_title: file.file_title,
-                section_id: savedSection._id,
-              });
-              console.log("clonedUpload", clonedUpload);
-              await clonedUpload.save();
-            }
-          }
-        }
-
-        return res.status(200).json({
-          status: true,
-          message: "New course(s) assigned to instructors successfully",
-        });
-      }
+        // course.instructor_ids = roleIdsObjectIds;
+        // course.assigned_to = roleIdsObjectIds;
+        course.participant_ids = [];
+      } 
+      course.instructor_ids = roleIdsObjectIds;
+      course.assigned_to = roleIdsObjectIds;
     }
 
     if (user_type === 2) {
@@ -456,9 +410,6 @@ export const updateCourse = async (req, res) => {
     const incomingSectionIds = sections
       .filter((s) => s._id && mongoose.Types.ObjectId.isValid(s._id))
       .map((s) => s._id.toString());
-
-    console.log("existingSections", existingSections);
-    console.log("incomingSectionIds", incomingSectionIds);
 
     const sectionsToDelete = existingSections.filter(
       (s) => !incomingSectionIds.includes(s._id.toString())
@@ -482,11 +433,9 @@ export const updateCourse = async (req, res) => {
       await Section.findByIdAndDelete(sec._id);
     }
 
-    console.log("sections", sections);
     for (const sec of sections) {
       const isValidMongoId =
         sec._id && mongoose.Types.ObjectId.isValid(sec._id.toString());
-      console.log("sec", sec);
       if (!isValidMongoId) {
         const newSec = new Section({
           course_id: courseId,
@@ -496,7 +445,6 @@ export const updateCourse = async (req, res) => {
           video: sec.video || [],
           document: sec.document || [],
         });
-        console.log("newSec", newSec);
         await newSec.save();
       } else {
         const dbSection = await Section.findById(sec._id);
