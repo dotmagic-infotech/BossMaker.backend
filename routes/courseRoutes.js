@@ -1,5 +1,5 @@
 import express from "express";
-import sectionUpload from "../utils/sectionUpload.js";
+// import sectionUpload from "../utils/sectionUpload.js";
 
 import {
   addCourse,
@@ -14,12 +14,12 @@ import { isValidToken } from "../controllers/authController.js";
 const router = express.Router();
 router.use(isValidToken);
 
-const uploadSection = sectionUpload("courses");
+// const uploadSection = sectionUpload("courses");
 
-router.post("/create", uploadSection.any(), addCourse);
+router.post("/create", addCourse);
 router.get("/", getCourse);
 router.get("/:id", getCourseById);
-router.put("/update/:id", uploadSection.any(), updateCourse);
+router.put("/update/:id", updateCourse);
 router.delete("/delete", deleteCourse);
 router.patch("/status", updateStatus);
 

@@ -16,7 +16,8 @@ const courseSchema = new mongoose.Schema(
       required: true,
     },
     course_image: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Upload",
     },
     status: {
       type: Boolean,

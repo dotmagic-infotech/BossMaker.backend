@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import Course from "../models/Course.js";
 import Category from "../models/Category.js";
 import Section from "../models/Section.js";
+import Upload from "../models/Upload.js";
 import {
   getCourseImageURL,
   getCourseVideoURL,
@@ -22,16 +23,13 @@ export const addCourse = async (req, res) => {
       category_id,
       status,
       instructor_ids,
+      course_image,
       participant_ids = [],
+      sections = [],
     } = req.body;
 
     const created_by = req.user._id;
     const user_type = req.user.user_type;
-
-    const courseImageFile = req.files.find(
-      (f) => f.fieldname === "course_image"
-    );
-    const course_image = courseImageFile ? courseImageFile.filename : null;
 
     let rawRoleIds = [];
 
@@ -83,7 +81,6 @@ export const addCourse = async (req, res) => {
     }
 
     const duplicatedCourses = [];
-    const parsedSections = parseBodySections(req.body);
 
     const courseData = {
       title,
@@ -118,7 +115,7 @@ export const addCourse = async (req, res) => {
           assigned_to: roleId,
         });
 
-        await storeSections(req.files, course._id, parsedSections);
+        await storeSections(sections, course._id);
         duplicatedCourses.push(course);
       }
     }
@@ -141,7 +138,7 @@ export const addCourse = async (req, res) => {
         assigned_to: created_by,
       });
 
-      await storeSections(req.files, course._id, parsedSections);
+      await storeSections(sections, course._id);
       duplicatedCourses.push(course);
     }
 
@@ -238,7 +235,9 @@ export const getCourse = async (req, res) => {
 export const getCourseById = async (req, res) => {
   try {
     const user_type = req.user.user_type;
-    const course = await Course.findById(req.params.id).populate(
+    const courseId = req.params.id;
+
+    const course = await Course.findById(courseId).populate(
       "category_id",
       "name"
     );
@@ -264,127 +263,57 @@ export const getCourseById = async (req, res) => {
       }));
     }
 
-    result.course_image = getCourseImageURL(
-      course.course_image?.filename || course.course_image
-    );
+    if (course.course_image) {
+      const imageDoc = await Upload.findById(course.course_image);
+      result.course_image = imageDoc || null;
+    } else {
+      result.course_image = null;
+    }
 
-    const sections = await Section.find({ course_id: course._id });
+    const sections = await Section.find({ course_id: course._id }).lean();
 
-    // result.sections = Array.isArray(sections)
-    //   ? sections.map((section) => ({
-    //       _id: section._id,
-    //       title: section.title,
-    //       lesson: section.lesson || "",
-    //       image: Array.isArray(section.image)
-    //         ? section.image.map((img) => getCourseImageURL(img.trim()))
-    //         : typeof section.image === "string"
-    //         ? section.image
-    //             .split(",")
-    //             .map((img) => getCourseImageURL(img.trim()))
-    //         : [],
-    //       video: Array.isArray(section.video)
-    //         ? section.video.map((vid) => getCourseVideoURL(vid.trim()))
-    //         : typeof section.video === "string"
-    //         ? section.video
-    //             .split(",")
-    //             .map((vid) => getCourseVideoURL(vid.trim()))
-    //         : [],
-    //       document: Array.isArray(section.document)
-    //         ? section.document.map((doc) => getCourseDocumentURL(doc.trim()))
-    //         : typeof section.document === "string"
-    //         ? section.document
-    //             .split(",")
-    //             .map((doc) => getCourseDocumentURL(doc.trim()))
-    //         : [],
-    //     }))
-    //   : [];
+    const gatherIds = (arr) =>
+      Array.isArray(arr) ? arr.map((o) => o._id).filter(Boolean) : [];
 
-    // result.sections = Array.isArray(sections)
-    //   ? sections.map((section) => ({
-    //       _id: section._id,
-    //       title: section.title,
-    //       lesson: section.lesson || "",
-    //       image: Array.isArray(section.image)
-    //         ? section.image.map((img) => getCourseImageURL(img.trim()))
-    //         : typeof section.image === "string"
-    //         ? section.image
-    //             .split(",")
-    //             .map((img) => getCourseImageURL(img.trim()))
-    //         : [],
-    //       video: Array.isArray(section.video)
-    //         ? section.video.map((vid) => vid.trim())
-    //         : typeof section.video === "string"
-    //         ? section.video.split(",").map((vid) => vid.trim())
-    //         : [],
-    //       document: Array.isArray(section.document)
-    //         ? section.document.map((doc) => doc.trim())
-    //         : typeof section.document === "string"
-    //         ? section.document.split(",").map((doc) => doc.trim())
-    //         : [],
-    //     }))
-    //   : [];
+    const imageIds = sections.flatMap((s) => gatherIds(s.image));
+    const videoIds = sections.flatMap((s) => gatherIds(s.video));
+    const documentIds = sections.flatMap((s) => gatherIds(s.document));
+    const allUploadIds = [
+      ...new Set([
+        ...imageIds.map(String),
+        ...videoIds.map(String),
+        ...documentIds.map(String),
+      ]),
+    ];
 
-    // result.sections = Array.isArray(sections)
-    //   ? sections.map((section) => ({
-    //       _id: section._id,
-    //       title: section.title,
-    //       lesson: section.lesson || "",
+    // Batch fetch uploads
+    const uploads = await Upload.find({ _id: { $in: allUploadIds } }).lean();
+    const uploadMap = uploads.reduce((m, u) => {
+      m[u._id.toString()] = u;
+      return m;
+    }, {});
 
-    //       image: Array.isArray(section.image)
-    //         ? section.image.map((img) => ({
-    //             stored_name: img.trim(),
-    //             original_name: img.trim(),
-    //           }))
-    //         : typeof section.image === "string"
-    //         ? section.image.split(",").map((img) => ({
-    //             stored_name: img.trim(),
-    //             original_name: img.trim(),
-    //           }))
-    //         : [],
+    // Replace the id wrappers with actual docs, filtering out missing ones
+    const sectionsWithMedia = sections.map((section) => {
+      const safeMap = (arr) =>
+        Array.isArray(arr)
+          ? arr
+              .map((o) => {
+                const key = o._id ? o._id.toString() : null;
+                return key && uploadMap[key] ? uploadMap[key] : null;
+              })
+              .filter(Boolean)
+          : [];
 
-    //       video: Array.isArray(section.video)
-    //         ? section.video.map((vid) => ({
-    //             stored_name: vid.trim(),
-    //             original_name: vid.trim(),
-    //           }))
-    //         : typeof section.video === "string"
-    //         ? section.video.split(",").map((vid) => ({
-    //             stored_name: vid.trim(),
-    //             original_name: vid.trim(),
-    //           }))
-    //         : [],
+      return {
+        ...section,
+        image: safeMap(section.image),
+        video: safeMap(section.video),
+        document: safeMap(section.document),
+      };
+    });
 
-    //       document: Array.isArray(section.document)
-    //         ? section.document.map((doc) => ({
-    //             stored_name: doc.trim(),
-    //             original_name: doc.trim(),
-    //           }))
-    //         : typeof section.document === "string"
-    //         ? section.document.split(",").map((doc) => ({
-    //             stored_name: doc.trim(),
-    //             original_name: doc.trim(),
-    //           }))
-    //         : [],
-    //     }))
-    //   : [];
-
-    result.sections = sections.map((section) => ({
-      _id: section._id,
-      title: section.title,
-      lesson: section.lesson || "",
-      image: section.image.map((file) => ({
-        ...(file.toObject?.() || file),
-        stored_name: getCourseImageURL(file.stored_name),
-      })),
-      video: section.video.map((file) => ({
-        ...(file.toObject?.() || file),
-        stored_name: getCourseVideoURL(file.stored_name),
-      })),
-      document: section.document.map((file) => ({
-        ...(file.toObject?.() || file),
-        stored_name: getCourseDocumentURL(file.stored_name),
-      })),
-    }));
+    result.sections = sectionsWithMedia;
 
     res.json({ status: true, course: result });
   } catch (error) {
@@ -404,11 +333,10 @@ export const updateCourse = async (req, res) => {
       category_id,
       status,
       instructor_ids,
+      course_image,
+      sections = [],
       participant_ids = [],
-      removedFiles = "[]",
     } = req.body;
-
-    const removed = JSON.parse(removedFiles);
 
     let rawRoleIds = [];
     if (user_type === 1) rawRoleIds = parseIds(instructor_ids);
@@ -429,65 +357,14 @@ export const updateCourse = async (req, res) => {
     if (!course) throw new Error("Course not found");
     if (!title || !category_id) throw new Error("Missing required fields.");
 
-    // === DELETE REMOVED FILES ===
-    // for (const item of removed) {
-    //   const sectionId = item.section_id;
-    //   const section = await Section.findById(sectionId);
-    //   if (!section) continue;
-
-    //   for (const [type, files] of Object.entries(item.section)) {
-    //     for (const file of files) {
-    //       const filePath = path.join(UPLOADS_DIR, file.stored_name);
-    //       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    //       section[type] = section[type].filter(
-    //         (f) => f._id.toString() !== file._id
-    //       );
-    //     }
-    //   }
-    //   await section.save();
-    // }
-
-    if (req.file) {
-      uploadedFile = req.file.filename;
-      if (course.course_image) {
-        const oldImagePath = path.join("uploads/courses", course.course_image);
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
-      }
-      course.course_image = uploadedFile;
-    }
-
-    // === ADD NEW FILES ===
-    // const files = req.files || {};
-    // for (const field in files) {
-    //   const match = field.match(/section\[(\d+)\](image|video|document)/);
-    //   if (!match) continue;
-
-    //   const index = match[1];
-    //   const type = match[2];
-    //   const sectionId = req.body[`section[${index}][id]`]; // Send sectionId in form
-
-    //   const section = await Section.findById(sectionId);
-    //   if (!section) continue;
-
-    //   for (const file of files[field]) {
-    //     const newFile = {
-    //       stored_name: file.filename,
-    //       original_name: file.originalname,
-    //     };
-    //     section[type].push(newFile);
-    //     uploadedFiles.push(path.join(UPLOADS_DIR, file.filename));
-    //   }
-
-    //   await section.save();
-    // }
-
     course.title = title.trim();
     course.description = description;
     course.category_id = category_id;
     course.status = status;
     course.user_type = user_type;
+    course.course_image = course_image;
+
+    const sourceSections = await Section.find({ course_id: courseId });
 
     if (user_type === 1) {
       const originalInstructorIds = Array.isArray(course.assigned_to)
@@ -496,52 +373,31 @@ export const updateCourse = async (req, res) => {
         ? [course.assigned_to.toString()]
         : [];
 
-      const newInstructorIds = roleIdsObjectIds
-        .map((id) => id.toString())
-        .sort();
+      const newInstructorIds = roleIdsObjectIds.map((id) => id.toString()).sort();
 
       const isSameInstructors =
         originalInstructorIds.length === newInstructorIds.length &&
-        originalInstructorIds.every(
-          (val, index) => val === newInstructorIds[index]
-        );
+        originalInstructorIds.every((val, index) => val === newInstructorIds[index]);
 
-      if (isSameInstructors) {
-        course.instructor_ids = roleIdsObjectIds;
-        course.assigned_to = roleIdsObjectIds;
-      } else {
-        const conflict = await Course.findOne({
-          _id: { $ne: courseId },
-          title: title.trim(),
-          assigned_to: { $in: roleIdsObjectIds },
-        });
+      if (!isSameInstructors) {
+        // const conflict = await Course.findOne({
+        //   _id: { $ne: courseId },
+        //   title: title.trim(),
+        //   assigned_to: { $in: roleIdsObjectIds },
+        // });
 
-        if (conflict) {
-          throw new Error(
-            "One or more selected instructors already have this course assigned."
-          );
-        }
+        // if (conflict) {
+        //   throw new Error(
+        //     "One or more selected instructors already have this course assigned."
+        //   );
+        // }
 
-        for (const instructorId of roleIdsObjectIds) {
-          const duplicateCourse = new Course({
-            title: title.trim(),
-            description,
-            category_id,
-            course_image: course.course_image,
-            status,
-            user_type: 2,
-            instructor_ids: [instructorId],
-            assigned_to: [instructorId],
-            created_by: userId,
-          });
-          await duplicateCourse.save();
-        }
-
-        return res.status(200).json({
-          status: true,
-          message: "New course(s) assigned to instructors successfully",
-        });
-      }
+        // course.instructor_ids = roleIdsObjectIds;
+        // course.assigned_to = roleIdsObjectIds;
+        course.participant_ids = [];
+      } 
+      course.instructor_ids = roleIdsObjectIds;
+      course.assigned_to = roleIdsObjectIds;
     }
 
     if (user_type === 2) {
@@ -550,6 +406,59 @@ export const updateCourse = async (req, res) => {
 
     await course.save();
 
+    const existingSections = sourceSections;
+    const incomingSectionIds = sections
+      .filter((s) => s._id && mongoose.Types.ObjectId.isValid(s._id))
+      .map((s) => s._id.toString());
+
+    const sectionsToDelete = existingSections.filter(
+      (s) => !incomingSectionIds.includes(s._id.toString())
+    );
+    for (const sec of sectionsToDelete) {
+      const allFileIds = [
+        ...(sec.image || []),
+        ...(sec.video || []),
+        ...(sec.document || []),
+      ].map((f) => f._id);
+
+      if (allFileIds.length > 0) {
+        const uploadedFiles = await Upload.find({ _id: { $in: allFileIds } });
+        for (const file of uploadedFiles) {
+          if (file?.file_path && fs.existsSync(file.file_path)) {
+            fs.unlinkSync(file.file_path);
+          }
+        }
+        await Upload.deleteMany({ _id: { $in: allFileIds } });
+      }
+      await Section.findByIdAndDelete(sec._id);
+    }
+
+    for (const sec of sections) {
+      const isValidMongoId =
+        sec._id && mongoose.Types.ObjectId.isValid(sec._id.toString());
+      if (!isValidMongoId) {
+        const newSec = new Section({
+          course_id: courseId,
+          title: sec.title,
+          lesson: sec.lesson,
+          image: sec.image || [],
+          video: sec.video || [],
+          document: sec.document || [],
+        });
+        await newSec.save();
+      } else {
+        const dbSection = await Section.findById(sec._id);
+        if (!dbSection) continue;
+
+        dbSection.title = sec.title;
+        dbSection.lesson = sec.lesson;
+        dbSection.image = sec.image || [];
+        dbSection.video = sec.video || [];
+        dbSection.document = sec.document || [];
+        await dbSection.save();
+      }
+    }
+
     res.status(200).json({
       status: true,
       message: "Course updated successfully",
@@ -557,7 +466,7 @@ export const updateCourse = async (req, res) => {
     });
   } catch (err) {
     if (uploadedFile) {
-      const filePath = path.join("uploads/courses", uploadedFile);
+      const filePath = path.join("uploads", uploadedFile);
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
@@ -579,7 +488,7 @@ export const deleteCourse = async (req, res) => {
     if (!id) {
       return res
         .status(400)
-        .json({ status: false, message: "User ID is required" });
+        .json({ status: false, message: "Course ID is required" });
     }
 
     const course = await Course.findById(id);
@@ -590,35 +499,17 @@ export const deleteCourse = async (req, res) => {
     }
 
     const sections = await Section.find({ course_id: id });
-
     for (const section of sections) {
-      const fileGroups = [
-        section.image,
-        section.video,
-        section.document,
-      ].filter(Boolean);
-
-      for (const group of fileGroups) {
-        if (Array.isArray(group)) {
-          for (const file of group) {
-            const storedName = file.stored_name;
-            if (storedName) {
-              const fullPath = path.join("uploads/courses", storedName);
-              if (fs.existsSync(fullPath)) {
-                fs.unlinkSync(fullPath);
-              }
-            }
-          }
-        }
-      }
+      await deleteSectionFiles(section);
       await Section.findByIdAndDelete(section._id);
     }
 
     if (course.course_image) {
-      const imagePath = path.join("uploads/courses", course.course_image);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
+      const courseImageDoc = await Upload.findById(course.course_image);
+      if (courseImageDoc && fs.existsSync(courseImageDoc.file_path)) {
+        fs.unlinkSync(courseImageDoc.file_path);
       }
+      await Upload.findByIdAndDelete(course.course_image);
     }
 
     if (userType === 1) {
@@ -631,32 +522,16 @@ export const deleteCourse = async (req, res) => {
 
       for (const rel of relatedCourses) {
         if (rel.course_image) {
-          const relImgPath = path.join("uploads/courses", rel.course_image);
-          if (fs.existsSync(relImgPath)) {
-            fs.unlinkSync(relImgPath);
+          const relImgDoc = await Upload.findById(rel.course_image);
+          if (relImgDoc && fs.existsSync(relImgDoc.file_path)) {
+            fs.unlinkSync(relImgDoc.file_path);
           }
+          await Upload.findByIdAndDelete(rel.course_image);
         }
+
         const relSections = await Section.find({ course_id: rel._id });
         for (const relSec of relSections) {
-          const fileGroups = [
-            relSec.image,
-            relSec.video,
-            relSec.document,
-          ].filter(Boolean);
-
-          for (const group of fileGroups) {
-            if (Array.isArray(group)) {
-              for (const file of group) {
-                const storedName = file.stored_name;
-                if (storedName) {
-                  const filePath = path.join("uploads/sections", storedName); // adjust folder if needed
-                  if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                  }
-                }
-              }
-            }
-          }
+          await deleteSectionFiles(relSec);
           await Section.findByIdAndDelete(relSec._id);
         }
 
@@ -735,97 +610,19 @@ export const updateStatus = async (req, res) => {
   }
 };
 
-const parseBodySections = (reqBody) => {
-  const parsed = {};
-
-  Object.entries(reqBody).forEach(([key, value]) => {
-    const match = key.match(
-      /^sections\[(\d+)\](?:\.|\[)(title|lesson)(?:\])?$/
-    );
-    if (match) {
-      const index = match[1];
-      const field = match[2];
-
-      if (!parsed[index]) parsed[index] = {};
-      parsed[index][field] = value;
-    }
-  });
-
-  return parsed;
-};
-
-const storeSections = async (files, courseId, bodySections = {}) => {
-  const fileMap = {};
-
-  files.forEach((file) => {
-    const match = file.fieldname.match(
-      /^sections\[(\d+)\]\.(image|video|document)$/
-    );
-    if (!match) return;
-
-    const index = match[1];
-    const type = match[2];
-
-    if (!fileMap[index]) {
-      fileMap[index] = {
-        image: [],
-        video: [],
-        document: [],
-      };
-    }
-
-    // if (type === "image") {
-    //   fileMap[index].image.push(file.filename);
-    // } else if (type === "video") {
-    //   fileMap[index].video.push(file.filename);
-    // } else if (type === "document") {
-    //   fileMap[index].document.push(file.filename);
-    // }
-    fileMap[index][type].push({
-      stored_name: file.filename,
-      original_name: file.originalname,
-    });
-  });
-
+const storeSections = async (sections, courseId) => {
   const sectionEntries = [];
 
-  // for (const [index, fileGroup] of Object.entries(fileMap)) {
-  //   const sectionData = bodySections[index] || {};
-  //   const title = sectionData.title || `Untitled Section ${index}`;
-  //   const lesson = sectionData.lesson || "";
-
-  //   const section = new Section({
-  //     course_id: courseId,
-  //     title,
-  //     lesson,
-  //     image: fileGroup.image,
-  //     video: fileGroup.video,
-  //     document: fileGroup.document,
-  //   });
-
-  //   await section.save();
-  //   sectionEntries.push(section);
-  // }
-
-  const allIndices = new Set([
-    ...Object.keys(bodySections),
-    ...Object.keys(fileMap),
-  ]);
-
-  for (const index of allIndices) {
-    const sectionData = bodySections[index] || {};
-    const fileGroup = fileMap[index] || { image: [], video: [], document: [] };
-
-    const title = sectionData.title || `Untitled Section ${index}`;
-    const lesson = sectionData.lesson || "";
+  for (let i = 0; i < sections.length; i++) {
+    const sectionData = sections[i] || {};
 
     const section = new Section({
       course_id: courseId,
-      title,
-      lesson,
-      image: fileGroup.image,
-      video: fileGroup.video,
-      document: fileGroup.document,
+      title: sectionData.title || `Untitled Section ${i}`,
+      lesson: sectionData.lesson || "",
+      image: sectionData.image || [],
+      video: sectionData.video || [],
+      document: sectionData.document || [],
     });
 
     await section.save();
@@ -833,6 +630,24 @@ const storeSections = async (files, courseId, bodySections = {}) => {
   }
 
   return sectionEntries;
+};
+
+const deleteSectionFiles = async (section) => {
+  const fileGroups = [section.image, section.video, section.document].filter(
+    Boolean
+  );
+
+  for (const group of fileGroups) {
+    if (Array.isArray(group)) {
+      for (const fileRef of group) {
+        const fileDoc = await Upload.findById(fileRef._id);
+        if (fileDoc && fs.existsSync(fileDoc.file_path)) {
+          fs.unlinkSync(fileDoc.file_path);
+        }
+        await Upload.findByIdAndDelete(fileRef._id);
+      }
+    }
+  }
 };
 
 function parseIds(value) {

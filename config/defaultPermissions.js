@@ -8,7 +8,7 @@ export const defaultPermissions = {
       slug: "view_category",
       action: "view",
       _id: new mongoose.Types.ObjectId(),
-      is_access: false,
+      is_access: true,
     },
     {
       title: "Edit Category",
@@ -26,7 +26,7 @@ export const defaultPermissions = {
       slug: "view_participants",
       action: "view",
       _id: new mongoose.Types.ObjectId(),
-      is_access: false,
+      is_access: true,
     },
     {
       title: "Edit Participants",
@@ -44,7 +44,7 @@ export const defaultPermissions = {
       slug: "view_course",
       action: "view",
       _id: new mongoose.Types.ObjectId(),
-      is_access: false,
+      is_access: true,
     },
     {
       title: "Edit Course",
