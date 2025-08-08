@@ -17,5 +17,5 @@ const uploadfile = new mongoose.Schema(
   },
 );
 
-const upload = mongoose.model("upload", uploadfile);
+const upload = mongoose.model("Upload", uploadfile);
 export default upload;

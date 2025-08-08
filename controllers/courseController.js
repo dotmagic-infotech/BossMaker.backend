@@ -184,6 +184,7 @@ export const getCourse = async (req, res) => {
 
     let courseQuery = Course.find(query)
       .populate("category_id", "name")
+      .populate("course_image")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parsedLimit);
@@ -202,15 +203,7 @@ export const getCourse = async (req, res) => {
       Course.countDocuments(query),
     ]);
 
-    const formattedCourses = courses.map((course) => {
-      const courseObj = course.toObject();
-      const filename =
-        typeof courseObj.course_image === "string"
-          ? courseObj.course_image
-          : courseObj.course_image?.filename;
-      courseObj.course_image = getCourseImageURL(filename);
-      return courseObj;
-    });
+    const formattedCourses = courses.map((course) => course.toObject());
 
     res.status(200).json({
       status: true,
